@@ -15,7 +15,8 @@ A lightweight, standalone graphical user interface (GUI) designed to easily pars
 
 [PyGame](https://pypi.org/project/pygame/)
 
-###Optional:
+###Optional
+
 [PyInstaller](https://pypi.org/project/pyinstaller/) 
 >If building from source
 
