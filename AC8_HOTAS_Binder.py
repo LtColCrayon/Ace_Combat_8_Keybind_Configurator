@@ -4,6 +4,9 @@ import tkinter as  tk
 from tkinter import filedialog, messagebox, ttk
 import configparser
 import json
+import threading
+import pygame
+import stat
 
 STICK_BUTTONS = {
     1: "Trigger",
@@ -45,6 +48,9 @@ class Ace8X56Editor:
         self.root = root
         self.root.title("Ace Combat 8 - X56 Keybind Configurator")
         self.root.geometry("780x650")
+
+        pygame.init()
+        pygame.joystick.init()
 
         self.config = configparser.ConfigParser(
             delimiters=('=',),
@@ -114,6 +120,109 @@ class Ace8X56Editor:
         except Exception as e:
             messagebox.showinfo("Error", f"Failed to open config:\n{str(e)}")
 
+    def start_listening_thread(self, type_combo, btn_combo, hardware_map, bind_btn):
+        bind_btn.config(text="Press a key...", state=tk.DISABLED)
+        threading.Thread(
+            target=self.hw_capture_worker,
+            args=(type_combo, btn_combo, hardware_map, bind_btn),
+            daemon=True
+            ).start()
+
+    def hw_capture_worker(self, type_combo, btn_combo, hardware_map, bind_btn):
+        joystick_count = pygame.joystick.get_count()
+        if joystick_count == 0:
+            self.root.after(0, lambda: messagebox.showwarning("Device Alert", "No controller detected. Make sure X56 is connected."))
+            self.root.after(0, lambda: bind_btn.config(text="Bind", state=tk.NORMAL))
+            return
+
+        joysticks = [pygame.joystick.Joystick(i) for i in range(joystick_count)]
+        for joy in joysticks:
+            if not joy.get_init():
+                joy.init
+
+        state = {
+            "captured_type": "None",
+            "captured_display": "0 (Unassigned)"
+            }
+        listening = True
+
+        H1_BUTTONS = {7: "H1_U", 8: "H1_R", 9: "H1_D", 10: "H1_L"}
+        H2_BUTTONS = {11: "H2_U", 12: "H2_R", 13: "H2_D", 14: "H2_L"}
+
+        while listening:
+            pygame.event.pump()
+            for joy in joysticks:
+                for b_idx in range(joy.get_numbuttons()):
+                    if joy.get_button(b_idx):
+                        mapped_idx = b_idx + 1
+
+                        if mapped_idx in H1_BUTTONS:
+                            state["captured_type"] = H1_BUTTONS[mapped_idx]
+                            state["captured_display"] = "0 (Unassigned)"
+                        elif mapped_idx in H2_BUTTONS:
+                            state["captured_type"] = H2_BUTTONS[mapped_idx]
+                            state["captured_display"] = "0 (Unassigned)"
+                        else:
+                            state["captured_type"] = "Button"
+                            if mapped_idx in hardware_map:
+                                button_name = hardware_map[mapped_idx]
+                                state["captured_display"] = f"ID {mapped_idx} ({button_name})"
+                            else:
+                                state["captured_display"] = f"ID {mapped_idx} (Unknown Button)"
+
+                        listening = False
+                        break
+                if not listening: break
+
+                for a_idx in range(joy.get_numaxes()):
+                    axis_val = joy.get_axis(a_idx)
+                    if abs(axis_val) > 0.7:
+                        axis_map = {0: "X", 1: "Y", 2: "Rz", 3: "Rx", 4: "Ry"}
+                        state["captured_type"] = axis_map.get(a_idx, "X")
+                        state["captured_display"] = "0 (Unassigned)"
+                        listening = False
+                        break
+                if not listening: break
+
+                for h_idx in range(joy.get_numhats()):
+                    hat_val = joy.get_hat(h_idx)
+                    if hat_val != (0, 0):
+                        dir_suffix = ""
+                        if hat_val[1] == 1: dir_suffix = "U"
+                        elif hat_val[1] == -1: dir_suffix = "D"
+                        elif hat_val[0] == 1: dir_suffix = "R"
+                        elif hat_val[0] == -1: dir_suffix = "L"
+
+                        if dir_suffix:
+                            if h_idx == 0:
+                                state["captured_type"] = f"POV_{dir_suffix}"
+                            elif h_idx == 1:
+                                state["captured_type"] = f"H1_{dir_suffix}"
+                            elif h_idx == 2:
+                                state["captured_type"] = f"H2_{dir_suffix}"
+
+                        state["captured_display"] = "0 (Unassigned)"
+                        listening = False
+                        break
+                if not listening: break
+
+            pygame.time.wait(20)
+
+        self.root.after(0, lambda: self._safe_ui_update(type_combo, btn_combo, bind_btn, state))
+
+    def _safe_ui_update(self, type_combo, btn_combo, bind_btn, state):
+        type_combo.set(state["captured_type"])
+        btn_combo.set(state["captured_display"])
+        bind_btn.config(text="Bind", state=tk.NORMAL)
+
+    def _on_mousewheel(self, event, canvas):
+        if event.delta:
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        elif event.num == 4:
+            canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            canvas.yview_scroll(1, "units")
+
     def populate_tab(self, section_name, tab_frame, hardware_map):
         if not self.config.has_section(section_name):
             tk.Label(tab_frame, text=f"Missing section data inside file: [{section_name}]", fg="red").pack(pady=20)
@@ -126,6 +235,10 @@ class Ace8X56Editor:
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.bind_all("<MouseWheel>", lambda event: self._on_mousewheel(event, canvas))
+        canvas.bind_all("<Button-4>", lambda event: self._on_mousewheel(event, canvas))
+        canvas.bind_all("<Button-5>", lambda event: self._on_mousewheel(event, canvas))
 
         btn_options = {}
         for k, v in hardware_map.items():
@@ -165,7 +278,13 @@ class Ace8X56Editor:
             inputs_frame.grid(row=row, column=1, padx=5, pady=6, sticky="w")
 
             type_var = tk.StringVar(value=input_type)
-            type_combo = ttk.Combobox(inputs_frame, textvariable=type_var, values=["Button", "POV_U", "POV_D", "POV_L", "POV_R", "X", "Y", "Rz", "Rx", "Ry", "None"], width=8, state="readonly")
+            type_combo = ttk.Combobox(inputs_frame, textvariable=type_var, values=[
+                "Button",
+                "POV_U", "POV_D", "POV_L", "POV_R",
+                "H1_U", "H1_D", "H1_L", "H1_R",
+                "H2_U", "H2_D", "H2_L", "H2_R",
+                "X", "Y", "Rz", "Rx", "Ry", "None"
+                ], width=8, state="readonly")
             type_combo.pack(side=tk.LEFT, padx=2)
 
             current_display = "0 (Unassigned)"
@@ -183,6 +302,11 @@ class Ace8X56Editor:
             opt_combo = ttk.Combobox(inputs_frame, textvariable=opt_var, values=["Standard", "Reverse", "ReverseConvert"], width=14, state="readonly")
             opt_combo.pack(side=tk.LEFT, padx=2)
 
+            btn_bind = tk.Button(inputs_frame, text="Bind", font=("Arial", 8))
+            btn_bind.config(command=lambda tc=type_combo, bc=btn_combo, hm=hardware_map, b=btn_bind:
+                self.start_listening_thread(tc, bc, hm, b))
+            btn_bind.pack(side=tk.LEFT, padx=10)
+
             self.entries[section_name][key] = (type_var, btn_var, opt_var, btn_options)
             row += 1
 
@@ -193,6 +317,9 @@ class Ace8X56Editor:
         try:
             backup_path = f"{self.file_path}.bak"
             shutil.copy2(self.file_path, backup_path)
+
+            if os.path.exists(self.file_path):
+                os.chmod(self.file_path, stat.S_IWRITE)
 
             for section_name, controls in self.entries.items():
                 if not self.config.has_section(section_name):
@@ -226,6 +353,9 @@ class Ace8X56Editor:
 
             with open(self.file_path, "w") as configfile:
                 self.config.write(configfile, space_around_delimiters=False)
+
+            current_permissions = os.stat(self.file_path).st_mode
+            os.chmod(self.file_path, current_permissions | stat.S_IREAD)
 
             messagebox.showinfo("Saved", "Ace Combat 8 profile written successfully!")
         except Exception as e:
