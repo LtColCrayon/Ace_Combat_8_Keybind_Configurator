@@ -3,8 +3,11 @@ A lightweight, standalone graphical user interface (GUI) designed to easily pars
 
 ## Key Features
 • Zero Setup Auto-Detection: Automatically targets and opens the hidden game engine configurations sub-directory located within the local application user data (%localappdata%\BANDAI NAMCO Entertainment\ACE COMBAT 8\Saved\Config\Windows).
+
 • Logitech Profiler Nomenclature Sync: Maps hardcoded game input parameters directly to actual hardware names printed on the controller chassis (e.g., Trigger, Pinky Switch, SW 1-6, TGL 1-4, and handle rotaries).
+
 • Automatic Backup Engine: Safety checks initialization writes by dynamically generating a .bak copy of the pristine environment directory layout before modifying data matrices.
+
 • Axis Behavior Continuity Filters: Features specialized multi-axis rules for throttle grips and joysticks (X, Y, Rz, Rx, Ry), maintaining baseline flight option logic natively.
 
 ## Restoring From .bak File
